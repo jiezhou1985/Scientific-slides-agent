@@ -316,6 +316,93 @@ def _is_simple_frac(s: str, pos: int) -> bool:
 _UNICODE_SUPS = set("\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079")  # ⁰¹²³⁴⁵⁶⁷⁸⁹
 
 
+def _measure_equation_width(c, eq: str, base_font: str, base_size: float) -> float:
+    """Measure total drawn width of a formatted equation (no drawing)."""
+    w = 0.0
+    i = 0
+    sub_sz = base_size * 0.65
+    frac_sz = base_size * 0.75
+
+    # Label prefix
+    colon = eq.find(": ")
+    if 0 < colon < 25:
+        w += c.stringWidth(eq[:colon + 2], base_font, base_size)
+        i = colon + 2
+
+    while i < len(eq):
+        ch = eq[i]
+
+        if ch == "\u221a" and i + 1 < len(eq) and eq[i + 1] == "(":
+            end = _find_matching_paren(eq, i + 1)
+            content = eq[i + 2:end]
+            slash = _find_top_level_slash(content)
+            rad_w = base_size * 0.55
+            if slash is not None:
+                num_w = _measure_math_text(c, content[:slash].strip(), base_font, frac_sz)
+                den_w = _measure_math_text(c, content[slash + 1:].strip(), base_font, frac_sz)
+                w += rad_w + max(num_w, den_w) + 10
+            else:
+                w += rad_w + _measure_math_text(c, content, base_font, base_size) + 4
+            i = end + 1
+            continue
+
+        if ch == "(" and _is_simple_frac(eq, i):
+            end = _find_matching_paren(eq, i)
+            inside = eq[i + 1:end]
+            slash = _find_top_level_slash(inside)
+            num_w = _measure_math_text(c, inside[:slash].strip(), base_font, frac_sz)
+            den_w = _measure_math_text(c, inside[slash + 1:].strip(), base_font, frac_sz)
+            w += max(num_w, den_w) + 6
+            i = end + 1
+            continue
+
+        if ch == "_" and i + 1 < len(eq):
+            i += 1
+            if eq[i] == "{":
+                end = eq.find("}", i);
+                if end == -1: end = len(eq)
+                w += c.stringWidth(eq[i + 1:end], base_font, sub_sz)
+                i = end + 1
+            else:
+                w += c.stringWidth(eq[i], base_font, sub_sz)
+                i += 1
+            continue
+
+        if ch == "^" and i + 1 < len(eq):
+            i += 1
+            if eq[i] == "{":
+                end = eq.find("}", i)
+                if end == -1: end = len(eq)
+                w += c.stringWidth(eq[i + 1:end], base_font, sub_sz)
+                i = end + 1
+            elif eq[i] == "(":
+                end = _find_matching_paren(eq, i)
+                w += c.stringWidth(eq[i + 1:end], base_font, sub_sz)
+                i = end + 1
+            else:
+                w += c.stringWidth(eq[i], base_font, sub_sz)
+                i += 1
+            continue
+
+        if ch in _UNICODE_SUPS:
+            w += c.stringWidth(ch, base_font, sub_sz)
+            i += 1
+            continue
+
+        start = i
+        while i < len(eq):
+            if eq[i] in ("_", "^") or eq[i] in _UNICODE_SUPS:
+                break
+            if eq[i] == "\u221a" and i + 1 < len(eq) and eq[i + 1] == "(":
+                break
+            if eq[i] == "(" and _is_simple_frac(eq, i):
+                break
+            i += 1
+        w += c.stringWidth(eq[start:i], base_font, base_size)
+
+    return w
+
+
 def _draw_equation_formatted(c, eq: str, x: float, y: float,
                              base_font: str, base_size: float,
                              color, label_color):
@@ -397,7 +484,7 @@ def _draw_equation_formatted(c, eq: str, x: float, y: float,
                 i += 1
             c.setFont(base_font, sub_sz)
             c.setFillColor(color)
-            c.drawString(cx, y + base_size * 0.35, chunk)
+            c.drawString(cx, y + base_size * 0.55, chunk)
             cx += c.stringWidth(chunk, base_font, sub_sz)
             continue
 
@@ -406,7 +493,7 @@ def _draw_equation_formatted(c, eq: str, x: float, y: float,
             sup_sz = base_size * 0.65
             c.setFont(base_font, sup_sz)
             c.setFillColor(color)
-            c.drawString(cx, y + base_size * 0.35, ch)
+            c.drawString(cx, y + base_size * 0.55, ch)
             cx += c.stringWidth(ch, base_font, sup_sz)
             i += 1
             continue
@@ -597,11 +684,16 @@ def _draw_content(c, slide, figures_dir, stype):
     # ── Pre-calculate equation box height (needed for bullet spacing) ────────
     eq_h = 0
     if equations:
-        # Estimate: fraction/radical lines need more space than simple lines
+        lh_pre = []
         for eq in equations:
-            has_frac = ("/" in eq and "(" in eq) or "\u221a" in eq
-            eq_h += EQ_LEADING if has_frac else EQ_FONT_SZ * 1.8
-        eq_h += EQ_PAD_V * 2
+            has_tall = ("/" in eq) or ("\u221a" in eq)
+            lh_pre.append(EQ_LEADING if has_tall else EQ_FONT_SZ * 1.8)
+        baseline_span_pre = sum(lh_pre[:-1]) if len(lh_pre) > 1 else 0
+        frac_extra = EQ_FONT_SZ * 0.8 if any(
+            ("/" in eq) or ("\u221a" in eq) for eq in equations
+        ) else 0
+        visual_top_pre = EQ_FONT_SZ * 0.7
+        eq_h = EQ_PAD_V * 2 + visual_top_pre + baseline_span_pre + frac_extra
 
     # ── Bullets — laid out from top, leaving room for equations after ─────────
     bullets_top = heading_bottom - 4 * mm
@@ -650,14 +742,40 @@ def _draw_content(c, slide, figures_dir, stype):
         # fractions/radicals, normal leading for simple lines
         line_heights = []
         for eq in equations:
-            has_frac = ("/" in eq and "(" in eq) or "\u221a" in eq
-            lh = EQ_LEADING if has_frac else EQ_FONT_SZ * 1.8
+            # Any equation containing / likely has a stacked fraction
+            has_tall = ("/" in eq) or ("\u221a" in eq)
+            lh = EQ_LEADING if has_tall else EQ_FONT_SZ * 1.8
             line_heights.append(lh)
-        content_h = sum(line_heights)
-        bh = EQ_PAD_V * 2 + content_h
+        # Baseline-to-baseline span (N-1 gaps for N equations)
+        baseline_span = sum(line_heights[:-1]) if len(line_heights) > 1 else 0
+        # Extra below last baseline for fraction denominators
+        frac_descend = EQ_FONT_SZ * 0.8 if any(
+            ("/" in eq) or ("\u221a" in eq) for eq in equations
+        ) else 0
+        visual_top = EQ_FONT_SZ * 0.7   # cap-height above first baseline
+        total_visual = visual_top + baseline_span + frac_descend
+        bh = EQ_PAD_V * 2 + total_visual
 
-        bx = MARGIN_L
-        bw = text_w_mm * PTS
+        # ── Draw equations centered in the text area ──────────────────────
+        # First pass: draw invisibly off-page to measure actual rendered widths
+        eq_actual_widths = []
+        for eq in equations:
+            x_before = -10000.0
+            x_after = _draw_equation_formatted(
+                c, eq, x_before, -10000,
+                MATH_FONT, EQ_FONT_SZ,
+                color=C_DARK, label_color=C_ACCENT,
+            )
+            eq_actual_widths.append(x_after - x_before)
+        max_eq_w = max(eq_actual_widths)
+
+        # Size box to fit widest equation + padding
+        h_pad = 8 * mm                          # horizontal padding each side
+        bw = max_eq_w + h_pad * 2 + EQ_ACCENT_W
+
+        # Center box in available text area
+        area_w = text_w_mm * PTS
+        bx = MARGIN_L + (area_w - bw) / 2
         by = bullet_end_y - eq_gap - bh
 
         # Light background with rounded corners
@@ -668,11 +786,16 @@ def _draw_content(c, slide, figures_dir, stype):
         c.setFillColor(C_ACCENT)
         c.roundRect(bx, by, EQ_ACCENT_W, bh, 2, fill=1, stroke=0)
 
-        # Draw each equation, vertically centered in the box
-        ey = by + bh - EQ_PAD_V - EQ_FONT_SZ * 0.3
+        # Second pass: draw each equation truly centered in the box
+        usable_w = bw - EQ_ACCENT_W
+        # Vertically center: place content midpoint at box midpoint
+        center_y = by + bh / 2
+        ey = center_y + total_visual / 2 - visual_top
         for idx_eq, eq in enumerate(equations):
+            ew = eq_actual_widths[idx_eq]
+            eq_x = bx + EQ_ACCENT_W + (usable_w - ew) / 2
             _draw_equation_formatted(
-                c, eq, bx + EQ_PAD_L, ey,
+                c, eq, eq_x, ey,
                 MATH_FONT, EQ_FONT_SZ,
                 color=C_DARK, label_color=C_ACCENT,
             )
