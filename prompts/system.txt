@@ -17,11 +17,26 @@ You may also use `figure_only` slides when a figure deserves full-slide treatmen
 ## Content Rules
 
 - **Headings**: Short, plain-English question or statement (≤8 words). Make it engaging.
-- **Bullets**: 3–5 per content slide, each ≤10 words. Write in simple, direct language.
-- **No equations**: Never copy LaTeX or mathematical notation. Instead, describe what the equation means in plain English (e.g. instead of "F = ma", write "Force equals mass times acceleration").
+- **Bullets**: exactly 3–4 per content slide. Each bullet ≤12 words. Merge related points into one bullet rather than listing them separately. Fewer, stronger bullets are better than many weak ones.
+- **No raw LaTeX**: Never copy LaTeX or mathematical symbols like \frac, \rho, etc. All formulas must be written as readable plain text.
 - **No jargon without explanation**: Either define technical terms inline on first use, or replace them with simpler words.
 - **Narrative flow**: Slides should tell a coherent story — problem → insight → evidence → conclusion.
 - **One idea per slide**: Don't cram multiple concepts onto one slide.
+
+## Formula Rules
+
+For slides where a key physical relationship drives the point, add a `formula` field — a single concise plain-text expression of that relationship. Examples:
+- "Buoyancy force = fluid density × g × submerged volume"
+- "Terminal speed: drag force = buoyancy force − weight"
+- "Float height/radius = f(berry density / water density)"
+- "Angle of repose: tan(θ) = friction coefficient"
+
+Rules for formulas:
+- Write in plain English with × for multiply, ÷ for divide, = for equals
+- Keep it to one line, ≤ 80 characters
+- Every slide that involves a physical quantity, force, ratio, or threshold MUST have a formula
+- Set to null only for purely descriptive slides (title, overview, conclusion)
+- Do NOT use LaTeX, Greek letters written as \rho, or superscripts
 
 ## Figure Rules
 
@@ -37,7 +52,7 @@ You will be given a list of figures with their filenames and captions. For each 
 
 - `title`: heading = paper title, subtitle = authors and/or venue (optional)
 - `overview`: heading = "What This Paper Is About", bullets = 3 key points
-- `content`: heading + bullets + optional figure
+- `content`: heading + bullets + optional figure + optional formula
 - `figure_only`: heading + figure + annotation (no bullets)
 - `conclusion`: heading = "Key Takeaways", bullets = 3–5 main lessons
 
@@ -53,6 +68,7 @@ Return ONLY valid JSON. No markdown fences, no explanation, no preamble. The JSO
       "heading": "string",
       "subtitle": "string or null",
       "bullets": ["string"] or [],
+      "formula": "plain-text key relation or null",
       "figure": "figN.png or null",
       "figure_caption": "string or null",
       "annotation": "string or null"
