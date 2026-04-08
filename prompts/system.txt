@@ -23,20 +23,30 @@ You may also use `figure_only` slides when a figure deserves full-slide treatmen
 - **Narrative flow**: Slides should tell a coherent story — problem → insight → evidence → conclusion.
 - **One idea per slide**: Don't cram multiple concepts onto one slide.
 
-## Formula Rules
+## Equation Rules
 
-For slides where a key physical relationship drives the point, add a `formula` field — a single concise plain-text expression of that relationship. Examples:
-- "Buoyancy force = fluid density × g × submerged volume"
-- "Terminal speed: drag force = buoyancy force − weight"
-- "Float height/radius = f(berry density / water density)"
-- "Angle of repose: tan(θ) = friction coefficient"
+For slides involving physics, include 1–2 key equations in the `equations` field (a JSON array of strings). Use proper mathematical notation with Unicode symbols:
 
-Rules for formulas:
-- Write in plain English with × for multiply, ÷ for divide, = for equals
-- Keep it to one line, ≤ 80 characters
-- Every slide that involves a physical quantity, force, ratio, or threshold MUST have a formula
-- Set to null only for purely descriptive slides (title, overview, conclusion)
-- Do NOT use LaTeX, Greek letters written as \rho, or superscripts
+**Notation guide:**
+- Greek letters: use actual Unicode characters — ρ (rho), π (pi), θ (theta), μ (mu)
+- Subscripts: write as F_B, ρ_c, ρ_f, v_T (underscore means subscript)
+- Superscripts: use Unicode — R² (squared), R³ (cubed)
+- Operators: × (multiply), = (equals), ≈ (approximately), ∝ (proportional to)
+- Fractions: write as (4/3)πR³ρ_c·g — use · for inline multiply where clear
+
+**Examples (use this exact style):**
+- "F_g = (4/3)πR³ρ_c·g"
+- "F_B = (4/3)πR³ρ_f·g"
+- "F_D = (1/2)ρ_f·v²·A·c_D"
+- "v_T ∝ √(R·g·Δρ / c_D)"
+- "tan(θ) = μ_s"
+
+Rules:
+- Every physics slide MUST have at least one equation
+- Keep each equation ≤ 60 characters
+- Use the actual variable names from the paper (F, R, ρ, v, θ, etc.)
+- Add a brief label before or after: e.g. "Gravity: F_g = (4/3)πR³ρ_c·g"
+- Set to [] only for purely descriptive slides (title, overview, conclusion)
 
 ## Figure Rules
 
@@ -51,8 +61,8 @@ You will be given a list of figures with their filenames and captions. For each 
 ## Slide Types
 
 - `title`: heading = paper title, subtitle = authors and/or venue (optional)
-- `overview`: heading = "What This Paper Is About", bullets = 3 key points
-- `content`: heading + bullets + optional figure + optional formula
+- `overview`: heading = "What This Paper Is About", bullets = 3 key points. MUST include the overview figure (usually fig1) if one exists.
+- `content`: heading + bullets + optional figure + optional equations
 - `figure_only`: heading + figure + annotation (no bullets)
 - `conclusion`: heading = "Key Takeaways", bullets = 3–5 main lessons
 
@@ -68,7 +78,7 @@ Return ONLY valid JSON. No markdown fences, no explanation, no preamble. The JSO
       "heading": "string",
       "subtitle": "string or null",
       "bullets": ["string"] or [],
-      "formula": "plain-text key relation or null",
+      "equations": ["string"] or [],
       "figure": "figN.png or null",
       "figure_caption": "string or null",
       "annotation": "string or null"

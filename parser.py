@@ -28,9 +28,13 @@ def parse_pdf(pdf_path: str) -> dict:
         for img_info in image_list:
             xref = img_info[0]
 
-            # Skip tiny images (likely decorative or icons)
+            # Skip tiny images and extreme aspect ratios (journal sidebars, banners)
             pix = fitz.Pixmap(doc, xref)
             if pix.width < 100 or pix.height < 100:
+                pix = None
+                continue
+            aspect = max(pix.width, pix.height) / max(1, min(pix.width, pix.height))
+            if aspect > 5.0:
                 pix = None
                 continue
 
