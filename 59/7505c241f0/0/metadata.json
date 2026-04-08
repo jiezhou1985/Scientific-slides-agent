@@ -1,0 +1,38 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "597505c241f0",
+  "session_id": "6c214065-761e-4784-a01f-b7b2fef15e8d",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-08T19:11:40.048799868Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "parser.py",
+    "prompts/system.txt",
+    "renderer.py",
+    "requirements.txt",
+    "templates/slide.html",
+    "The physics of cranberry bogs.pdf",
+    "agent.py",
+    "main.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-4-6",
+  "turn_id": "2798c3e00eeb",
+  "token_usage": {
+    "input_tokens": 7,
+    "cache_creation_tokens": 7705,
+    "cache_read_tokens": 85854,
+    "output_tokens": 614,
+    "api_call_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-08T19:11:40.007654393Z",
+    "agent_lines": 809,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 809,
+    "agent_percentage": 100
+  }
+}
