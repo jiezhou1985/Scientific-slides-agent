@@ -1,15 +1,15 @@
 import json
 import os
-import anthropic
+import subprocess
 
 SYSTEM_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "system.txt")
-MODEL = "claude-opus-4-6"
-MAX_TOKENS = 4096
 
 
 def generate_slide_spec(text: str, figures: list[dict]) -> dict:
     """
-    Send paper text and figure list to Claude and return a validated slide spec dict.
+    Send paper text and figure list to Claude via the claude CLI and return
+    a validated slide spec dict. Uses the existing Claude Code authentication
+    (no API key required).
 
     Args:
         text: Full extracted paper text.
@@ -24,17 +24,23 @@ def generate_slide_spec(text: str, figures: list[dict]) -> dict:
     figures_section = _format_figures(figures)
     user_message = f"PAPER TEXT:\n\n{text}\n\n---\n\nFIGURES:\n\n{figures_section}"
 
-    client = anthropic.Anthropic()
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
+    result = subprocess.run(
+        [
+            "claude",
+            "--system-prompt", system_prompt,
+            "-p", user_message,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
+    raw = result.stdout.strip()
+    if result.returncode != 0 or not raw:
+        raise RuntimeError(
+            f"claude CLI failed (exit {result.returncode}):\n{result.stderr}"
+        )
 
-    raw = response.content[0].text.strip()
-
-    # Strip markdown code fences if Claude wrapped the JSON anyway
+    # Strip markdown code fences if Claude wrapped the JSON
     if raw.startswith("```"):
         lines = raw.splitlines()
         raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
@@ -47,10 +53,7 @@ def generate_slide_spec(text: str, figures: list[dict]) -> dict:
 def _format_figures(figures: list[dict]) -> str:
     if not figures:
         return "No figures extracted."
-    lines = []
-    for fig in figures:
-        lines.append(f"- {fig['filename']}: {fig['caption']}")
-    return "\n".join(lines)
+    return "\n".join(f"- {fig['filename']}: {fig['caption']}" for fig in figures)
 
 
 def _validate_spec(spec: dict) -> None:
