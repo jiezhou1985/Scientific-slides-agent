@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {
+    size: A4 landscape;
+    margin: 0;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background: white;
+    color: #1a1a2e;
+  }
+
+  .slide {
+    width: 297mm;
+    height: 210mm;
+    page-break-after: always;
+    page-break-inside: avoid;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .slide:last-child {
+    page-break-after: avoid;
+  }
+
+  /* ── Accent bar at top ── */
+  .slide-bar {
+    width: 100%;
+    height: 6px;
+    background: linear-gradient(90deg, #0f3460, #16213e, #533483);
+    flex-shrink: 0;
+  }
+
+  /* ── Title slide ── */
+  .slide-title {
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 20mm 25mm;
+    background: linear-gradient(135deg, #0f3460 0%, #16213e 60%, #533483 100%);
+    color: white;
+  }
+
+  .slide-title .slide-bar {
+    display: none;
+  }
+
+  .slide-title h1 {
+    font-size: 32pt;
+    font-weight: 700;
+    line-height: 1.25;
+    margin-bottom: 10mm;
+    letter-spacing: -0.5px;
+  }
+
+  .slide-title .subtitle {
+    font-size: 14pt;
+    opacity: 0.8;
+    font-weight: 300;
+  }
+
+  /* ── Shared content area ── */
+  .slide-body {
+    flex: 1;
+    padding: 10mm 14mm 8mm 14mm;
+    display: flex;
+    flex-direction: row;
+    gap: 10mm;
+  }
+
+  .slide-left {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .slide-heading {
+    font-size: 22pt;
+    font-weight: 700;
+    color: #0f3460;
+    margin-bottom: 6mm;
+    line-height: 1.2;
+    border-bottom: 2px solid #e8e8f0;
+    padding-bottom: 3mm;
+  }
+
+  .slide-bullets {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    flex: 1;
+  }
+
+  .slide-bullets li {
+    font-size: 15pt;
+    line-height: 1.5;
+    margin-bottom: 4mm;
+    padding-left: 6mm;
+    position: relative;
+    color: #2d2d44;
+  }
+
+  .slide-bullets li::before {
+    content: "▸";
+    color: #533483;
+    position: absolute;
+    left: 0;
+    font-size: 11pt;
+    top: 2px;
+  }
+
+  /* ── Figure panel ── */
+  .slide-figure {
+    width: 105mm;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .slide-figure img {
+    max-width: 100%;
+    max-height: 120mm;
+    object-fit: contain;
+    border: 1px solid #e0e0ec;
+    border-radius: 4px;
+  }
+
+  .slide-figure .fig-caption {
+    font-size: 9pt;
+    color: #666680;
+    text-align: center;
+    margin-top: 3mm;
+    font-style: italic;
+    line-height: 1.4;
+  }
+
+  /* ── Figure-only slide ── */
+  .slide-figure-only .slide-body {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 6mm 14mm;
+  }
+
+  .slide-figure-only .slide-heading {
+    border-bottom: none;
+    text-align: center;
+    margin-bottom: 4mm;
+    width: 100%;
+  }
+
+  .slide-figure-only img {
+    max-height: 115mm;
+    max-width: 100%;
+    object-fit: contain;
+    border: 1px solid #e0e0ec;
+    border-radius: 4px;
+  }
+
+  .slide-figure-only .annotation {
+    font-size: 11pt;
+    color: #444460;
+    text-align: center;
+    margin-top: 4mm;
+    font-style: italic;
+    max-width: 200mm;
+    line-height: 1.5;
+  }
+
+  /* ── Conclusion slide ── */
+  .slide-conclusion .slide-heading {
+    color: #533483;
+  }
+
+  .slide-conclusion .slide-bullets li::before {
+    content: "★";
+    color: #0f3460;
+  }
+
+  /* ── Slide number ── */
+  .slide-number {
+    position: absolute;
+    bottom: 5mm;
+    right: 10mm;
+    font-size: 8pt;
+    color: #aaaacc;
+  }
+</style>
+</head>
+<body>
+
+{% for slide in slides %}
+
+{# ── TITLE ── #}
+{% if slide.type == "title" %}
+<div class="slide slide-title">
+  <h1>{{ slide.heading }}</h1>
+  {% if slide.subtitle %}<p class="subtitle">{{ slide.subtitle }}</p>{% endif %}
+  <div class="slide-number">{{ loop.index }} / {{ slides|length }}</div>
+</div>
+
+{# ── FIGURE ONLY ── #}
+{% elif slide.type == "figure_only" %}
+<div class="slide slide-figure-only">
+  <div class="slide-bar"></div>
+  <div class="slide-body">
+    <div class="slide-heading">{{ slide.heading }}</div>
+    {% if slide.figure %}
+    <img src="{{ figures_dir }}/{{ slide.figure }}" alt="{{ slide.heading }}">
+    {% endif %}
+    {% if slide.annotation %}
+    <p class="annotation">{{ slide.annotation }}</p>
+    {% endif %}
+  </div>
+  <div class="slide-number">{{ loop.index }} / {{ slides|length }}</div>
+</div>
+
+{# ── CONTENT / OVERVIEW / CONCLUSION ── #}
+{% else %}
+<div class="slide {% if slide.type == 'conclusion' %}slide-conclusion{% endif %}">
+  <div class="slide-bar"></div>
+  <div class="slide-body">
+    <div class="slide-left">
+      <div class="slide-heading">{{ slide.heading }}</div>
+      {% if slide.bullets %}
+      <ul class="slide-bullets">
+        {% for bullet in slide.bullets %}
+        <li>{{ bullet }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% if slide.figure %}
+    <div class="slide-figure">
+      <img src="{{ figures_dir }}/{{ slide.figure }}" alt="{{ slide.heading }}">
+      {% if slide.figure_caption %}
+      <p class="fig-caption">{{ slide.figure_caption }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  <div class="slide-number">{{ loop.index }} / {{ slides|length }}</div>
+</div>
+{% endif %}
+
+{% endfor %}
+
+</body>
+</html>

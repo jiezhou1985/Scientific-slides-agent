@@ -1,0 +1,4 @@
+pymupdf
+anthropic
+reportlab
+pillow
