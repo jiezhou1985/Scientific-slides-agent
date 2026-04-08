@@ -1,16 +1,19 @@
 import sys
 import os
+import argparse
 from parser import parse_pdf
 from agent import generate_slide_spec
 from renderer import render_slides
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <paper.pdf>")
-        sys.exit(1)
+    ap = argparse.ArgumentParser(description="Generate slides from a scientific PDF")
+    ap.add_argument("pdf", help="Path to the input PDF paper")
+    ap.add_argument("--presenter", default="",
+                    help="Presenter line for the title slide (e.g. 'Presented by Name on Date')")
+    args = ap.parse_args()
 
-    pdf_path = sys.argv[1]
+    pdf_path = args.pdf
     if not os.path.isfile(pdf_path):
         print(f"Error: file not found: {pdf_path}")
         sys.exit(1)
@@ -24,7 +27,8 @@ def main():
     print(f"  {len(spec['slides'])} slides planned")
 
     print("Rendering PDF...")
-    output = render_slides(spec, parsed["figures_dir"], pdf_path)
+    output = render_slides(spec, parsed["figures_dir"], pdf_path,
+                           presenter=args.presenter)
     print(f"\nDone. Slides written to: {output}")
 
 

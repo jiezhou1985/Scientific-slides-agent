@@ -45,6 +45,12 @@ def generate_slide_spec(text: str, figures: list[dict]) -> dict:
         lines = raw.splitlines()
         raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
+    # Extract JSON object even if surrounded by extra text
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1:
+        raw = raw[start:end + 1]
+
     spec = json.loads(raw)
     _validate_spec(spec)
     return spec

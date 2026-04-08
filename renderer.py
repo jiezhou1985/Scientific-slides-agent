@@ -39,12 +39,22 @@ MARGIN_B =  8 * mm
 SLIDE_NUM_H = 6 * mm  # space reserved at bottom for slide number
 
 
-def render_slides(spec: dict, figures_dir: str, source_pdf_path: str) -> str:
+def render_slides(spec: dict, figures_dir: str, source_pdf_path: str,
+                   presenter: str = "") -> str:
     base = os.path.splitext(source_pdf_path)[0]
     output_path = base + "_slides.pdf"
 
     c = canvas.Canvas(output_path, pagesize=landscape(A4))
     slides = spec["slides"]
+
+    # Inject presenter into title slide
+    if presenter:
+        for slide in slides:
+            if slide.get("type") == "title":
+                slide["presenter"] = presenter
+                break
+
+    total = len(slides) + 1  # +1 for Thank You slide
 
     for idx, slide in enumerate(slides):
         stype = slide.get("type", "content")
@@ -52,10 +62,16 @@ def render_slides(spec: dict, figures_dir: str, source_pdf_path: str) -> str:
             _draw_title(c, slide)
         elif stype == "figure_only":
             _draw_figure_only(c, slide, figures_dir)
+        elif stype == "conclusion":
+            _draw_conclusion(c, slide)
         else:
             _draw_content(c, slide, figures_dir, stype)
-        _draw_slide_number(c, idx + 1, len(slides))
+        _draw_slide_number(c, idx + 1, total)
         c.showPage()
+
+    # Thank You closing slide
+    _draw_thankyou(c, total)
+    c.showPage()
 
     c.save()
     return os.path.abspath(output_path)
@@ -94,77 +110,325 @@ def _max_chars(width_mm: float, font_size: float) -> int:
     return max(10, int(width_mm * PTS / (font_size * 0.52)))
 
 
-def _parse_equation(eq: str) -> list[dict]:
-    """
-    Parse an equation string into segments with style info.
-    Handles: _x or _{xy} for subscripts, ^x or ^{xy} for superscripts.
-    A leading "Label:" prefix is detected for distinct styling.
-    """
-    segments = []
-    i = 0
-    # Detect label prefix (e.g. "Gravity: ")
-    colon_pos = eq.find(": ")
-    if colon_pos > 0 and colon_pos < 25:
-        segments.append({"text": eq[:colon_pos + 2], "style": "label"})
-        i = colon_pos + 2
+# ── Equation rendering with fractions, radicals, sub/superscripts ─────────────
 
-    while i < len(eq):
-        ch = eq[i]
-        if ch in ("_", "^") and i + 1 < len(eq):
-            style = "sub" if ch == "_" else "sup"
+def _find_matching_paren(s: str, pos: int) -> int:
+    """Find index of the closing ')' that matches '(' at pos."""
+    depth = 0
+    for i in range(pos, len(s)):
+        if s[i] == "(":
+            depth += 1
+        elif s[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return len(s) - 1
+
+
+def _find_top_level_slash(s: str):
+    """Find index of '/' not inside parentheses, or None."""
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "/" and depth == 0:
+            return i
+    return None
+
+
+def _measure_math_text(c, text: str, font: str, size: float) -> float:
+    """Measure width of text that may contain _sub and ^sup markers."""
+    w, i, sub_sz = 0.0, 0, size * 0.65
+    while i < len(text):
+        if text[i] in ("_", "^") and i + 1 < len(text):
             i += 1
-            if eq[i] == "{":
-                # Braced group: _{abc} or ^{abc}
-                end = eq.find("}", i)
+            if text[i] == "{":
+                end = text.find("}", i)
                 if end == -1:
-                    end = len(eq)
-                segments.append({"text": eq[i + 1:end], "style": style})
+                    end = len(text)
+                w += c.stringWidth(text[i + 1:end], font, sub_sz)
                 i = end + 1
             else:
-                segments.append({"text": eq[i], "style": style})
+                w += c.stringWidth(text[i], font, sub_sz)
                 i += 1
         else:
-            # Collect normal chars until next _ or ^
             start = i
-            while i < len(eq) and eq[i] not in ("_", "^"):
+            while i < len(text) and text[i] not in ("_", "^"):
                 i += 1
-            segments.append({"text": eq[start:i], "style": "normal"})
-    return segments
+            w += c.stringWidth(text[start:i], font, size)
+    return w
+
+
+def _draw_math_text(c, text: str, x: float, y: float,
+                    font: str, size: float, color) -> float:
+    """Draw text with sub/superscript support. Returns x after last char."""
+    cx, i, sub_sz = x, 0, size * 0.65
+    while i < len(text):
+        if text[i] == "_" and i + 1 < len(text):
+            i += 1
+            if text[i] == "{":
+                end = text.find("}", i)
+                if end == -1:
+                    end = len(text)
+                chunk = text[i + 1:end]
+                i = end + 1
+            else:
+                chunk = text[i]
+                i += 1
+            c.setFont(font, sub_sz)
+            c.setFillColor(color)
+            c.drawString(cx, y - size * 0.22, chunk)
+            cx += c.stringWidth(chunk, font, sub_sz)
+        elif text[i] == "^" and i + 1 < len(text):
+            i += 1
+            if text[i] == "{":
+                end = text.find("}", i)
+                if end == -1:
+                    end = len(text)
+                chunk = text[i + 1:end]
+                i = end + 1
+            elif text[i] == "(":
+                end = _find_matching_paren(text, i)
+                chunk = text[i + 1:end]
+                i = end + 1
+            else:
+                chunk = text[i]
+                i += 1
+            c.setFont(font, sub_sz)
+            c.setFillColor(color)
+            c.drawString(cx, y + size * 0.35, chunk)
+            cx += c.stringWidth(chunk, font, sub_sz)
+        else:
+            start = i
+            while i < len(text) and text[i] not in ("_", "^"):
+                i += 1
+            chunk = text[start:i]
+            c.setFont(font, size)
+            c.setFillColor(color)
+            c.drawString(cx, y, chunk)
+            cx += c.stringWidth(chunk, font, size)
+    return cx
+
+
+def _draw_frac(c, num: str, den: str, x: float, y: float,
+               font: str, base_size: float, color) -> float:
+    """Draw a stacked fraction (num over den). Returns width consumed."""
+    frac_sz = base_size * 0.75
+    num_w = _measure_math_text(c, num, font, frac_sz)
+    den_w = _measure_math_text(c, den, font, frac_sz)
+    frac_w = max(num_w, den_w) + 6          # 3pt padding each side
+    bar_y = y + base_size * 0.30             # fraction bar at mid-cap height
+
+    # Fraction bar
+    c.setStrokeColor(color)
+    c.setLineWidth(0.7)
+    c.line(x, bar_y, x + frac_w, bar_y)
+
+    # Numerator centered above bar
+    _draw_math_text(c, num, x + (frac_w - num_w) / 2,
+                    bar_y + 2, font, frac_sz, color)
+    # Denominator centered below bar
+    _draw_math_text(c, den, x + (frac_w - den_w) / 2,
+                    bar_y - frac_sz - 1, font, frac_sz, color)
+    return frac_w
+
+
+def _draw_sqrt(c, content: str, x: float, y: float,
+               font: str, base_size: float, color) -> float:
+    """Draw √ with overbar over content. Returns width consumed."""
+    # Check if content is a fraction (has top-level /)
+    slash = _find_top_level_slash(content)
+    if slash is not None:
+        return _draw_sqrt_frac(c, content[:slash].strip(),
+                               content[slash + 1:].strip(),
+                               x, y, font, base_size, color)
+
+    content_w = _measure_math_text(c, content, font, base_size)
+    rad_w = base_size * 0.55
+    top_y = y + base_size * 1.05
+
+    # Radical checkmark + overbar
+    c.setStrokeColor(color)
+    c.setLineWidth(0.8)
+    p = c.beginPath()
+    p.moveTo(x + 2, y + base_size * 0.45)
+    p.lineTo(x + rad_w * 0.35, y + base_size * 0.30)
+    p.lineTo(x + rad_w * 0.65, y - base_size * 0.12)
+    p.lineTo(x + rad_w, top_y)
+    p.lineTo(x + rad_w + content_w + 3, top_y)
+    c.drawPath(p, fill=0, stroke=1)
+
+    # Content
+    _draw_math_text(c, content, x + rad_w + 1, y, font, base_size, color)
+    return rad_w + content_w + 4
+
+
+def _draw_sqrt_frac(c, num: str, den: str, x: float, y: float,
+                    font: str, base_size: float, color) -> float:
+    """Draw √ over a stacked fraction. Returns width consumed."""
+    frac_sz = base_size * 0.75
+    num_w = _measure_math_text(c, num, font, frac_sz)
+    den_w = _measure_math_text(c, den, font, frac_sz)
+    frac_w = max(num_w, den_w) + 6
+    rad_w = base_size * 0.55
+
+    bar_y = y + base_size * 0.30
+    top_y = bar_y + frac_sz + 5              # above numerator
+
+    # Fraction bar
+    c.setStrokeColor(color)
+    c.setLineWidth(0.7)
+    c.line(x + rad_w, bar_y, x + rad_w + frac_w, bar_y)
+
+    # Numerator / denominator
+    _draw_math_text(c, num, x + rad_w + (frac_w - num_w) / 2,
+                    bar_y + 2, font, frac_sz, color)
+    _draw_math_text(c, den, x + rad_w + (frac_w - den_w) / 2,
+                    bar_y - frac_sz - 1, font, frac_sz, color)
+
+    # Radical checkmark + overbar
+    c.setStrokeColor(color)
+    c.setLineWidth(0.8)
+    p = c.beginPath()
+    p.moveTo(x + 2, y + base_size * 0.45)
+    p.lineTo(x + rad_w * 0.35, y + base_size * 0.30)
+    p.lineTo(x + rad_w * 0.65, y - base_size * 0.12)
+    p.lineTo(x + rad_w, top_y)
+    p.lineTo(x + rad_w + frac_w + 3, top_y)
+    c.drawPath(p, fill=0, stroke=1)
+
+    return rad_w + frac_w + 4
+
+
+def _is_simple_frac(s: str, pos: int) -> bool:
+    """Check if '(' at pos starts a simple (A/B) fraction."""
+    end = _find_matching_paren(s, pos)
+    inside = s[pos + 1:end]
+    slash = _find_top_level_slash(inside)
+    if slash is None:
+        return False
+    num, den = inside[:slash], inside[slash + 1:]
+    return len(num) <= 12 and len(den) <= 12 and "(" not in num
+
+
+_UNICODE_SUPS = set("\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079")  # ⁰¹²³⁴⁵⁶⁷⁸⁹
 
 
 def _draw_equation_formatted(c, eq: str, x: float, y: float,
                              base_font: str, base_size: float,
                              color, label_color):
     """
-    Draw a single equation with proper subscripts and superscripts.
-    Returns the x position after the last character drawn.
+    Draw a single equation with stacked fractions, radicals,
+    and proper sub/superscripts.
     """
-    segments = _parse_equation(eq)
-    sub_size = base_size * 0.65
     cx = x
-    for seg in segments:
-        text = seg["text"]
-        style = seg["style"]
-        if style == "label":
-            c.setFont(base_font, base_size)
-            c.setFillColor(label_color)
-            c.drawString(cx, y, text)
-            cx += c.stringWidth(text, base_font, base_size)
-        elif style == "sub":
-            c.setFont(base_font, sub_size)
+    i = 0
+
+    # ── Label prefix (e.g. "Gravity: ") ──────────────────────────────────
+    colon = eq.find(": ")
+    if 0 < colon < 25:
+        label = eq[:colon + 2]
+        c.setFont(base_font, base_size)
+        c.setFillColor(label_color)
+        c.drawString(cx, y, label)
+        cx += c.stringWidth(label, base_font, base_size)
+        i = colon + 2
+
+    # ── Main equation body ───────────────────────────────────────────────
+    while i < len(eq):
+        ch = eq[i]
+
+        # √( → square root
+        if ch == "\u221a" and i + 1 < len(eq) and eq[i + 1] == "(":
+            end = _find_matching_paren(eq, i + 1)
+            content = eq[i + 2:end]
+            cx += _draw_sqrt(c, content, cx, y, base_font, base_size, color)
+            i = end + 1
+            continue
+
+        # ( → possible stacked fraction
+        if ch == "(" and _is_simple_frac(eq, i):
+            end = _find_matching_paren(eq, i)
+            inside = eq[i + 1:end]
+            slash = _find_top_level_slash(inside)
+            num = inside[:slash].strip()
+            den = inside[slash + 1:].strip()
+            cx += _draw_frac(c, num, den, cx, y, base_font, base_size, color)
+            i = end + 1
+            continue
+
+        # _ → subscript
+        if ch == "_" and i + 1 < len(eq):
+            i += 1
+            sub_sz = base_size * 0.65
+            if eq[i] == "{":
+                end = eq.find("}", i)
+                if end == -1:
+                    end = len(eq)
+                chunk = eq[i + 1:end]
+                i = end + 1
+            else:
+                chunk = eq[i]
+                i += 1
+            c.setFont(base_font, sub_sz)
             c.setFillColor(color)
-            c.drawString(cx, y - base_size * 0.22, text)
-            cx += c.stringWidth(text, base_font, sub_size)
-        elif style == "sup":
-            c.setFont(base_font, sub_size)
+            c.drawString(cx, y - base_size * 0.22, chunk)
+            cx += c.stringWidth(chunk, base_font, sub_sz)
+            continue
+
+        # ^ → superscript
+        if ch == "^" and i + 1 < len(eq):
+            i += 1
+            sub_sz = base_size * 0.65
+            if eq[i] == "{":
+                end = eq.find("}", i)
+                if end == -1:
+                    end = len(eq)
+                chunk = eq[i + 1:end]
+                i = end + 1
+            elif eq[i] == "(":
+                end = _find_matching_paren(eq, i)
+                chunk = eq[i + 1:end]
+                i = end + 1
+            else:
+                chunk = eq[i]
+                i += 1
+            c.setFont(base_font, sub_sz)
             c.setFillColor(color)
-            c.drawString(cx, y + base_size * 0.35, text)
-            cx += c.stringWidth(text, base_font, sub_size)
-        else:
-            c.setFont(base_font, base_size)
+            c.drawString(cx, y + base_size * 0.35, chunk)
+            cx += c.stringWidth(chunk, base_font, sub_sz)
+            continue
+
+        # Unicode superscript characters (², ³, etc.) — draw raised
+        if ch in _UNICODE_SUPS:
+            sup_sz = base_size * 0.65
+            c.setFont(base_font, sup_sz)
             c.setFillColor(color)
-            c.drawString(cx, y, text)
-            cx += c.stringWidth(text, base_font, base_size)
+            c.drawString(cx, y + base_size * 0.35, ch)
+            cx += c.stringWidth(ch, base_font, sup_sz)
+            i += 1
+            continue
+
+        # Regular text — collect until next special char
+        start = i
+        while i < len(eq):
+            if eq[i] in ("_", "^"):
+                break
+            if eq[i] in _UNICODE_SUPS:
+                break
+            if eq[i] == "\u221a" and i + 1 < len(eq) and eq[i + 1] == "(":
+                break
+            if eq[i] == "(" and _is_simple_frac(eq, i):
+                break
+            i += 1
+        chunk = eq[start:i]
+        c.setFont(base_font, base_size)
+        c.setFillColor(color)
+        c.drawString(cx, y, chunk)
+        cx += c.stringWidth(chunk, base_font, base_size)
+
     return cx
 
 
@@ -269,6 +533,14 @@ def _draw_title(c, slide):
         c.setFillColor(HexColor("#ccccdd"))
         sw = c.stringWidth(subtitle, "Helvetica", 12)
         c.drawString(PAGE_W / 2 - sw / 2, ty - 6, subtitle)
+        ty -= 12 * 1.3 + 6
+
+    presenter = slide.get("presenter") or ""
+    if presenter:
+        c.setFont("Helvetica", 11)
+        c.setFillColor(HexColor("#aaaacc"))
+        pw = c.stringWidth(presenter, "Helvetica", 11)
+        c.drawString(PAGE_W / 2 - pw / 2, ty - 12, presenter)
 
 
 def _draw_content(c, slide, figures_dir, stype):
@@ -296,11 +568,11 @@ def _draw_content(c, slide, figures_dir, stype):
     # ── Layout constants ──────────────────────────────────────────────────────
     FIG_W_MM    = 108.0
     GAP_MM      = 7.0
-    EQ_FONT_SZ  = 14
-    EQ_LEADING  = EQ_FONT_SZ * 1.6
+    EQ_FONT_SZ  = 18
+    EQ_LEADING  = EQ_FONT_SZ * 2.6  # taller for stacked fractions / radicals
     EQ_ACCENT_W = 3              # pts, accent bar width
     EQ_PAD_L    = 5 * mm         # left padding inside box (after accent bar)
-    EQ_PAD_V    = 3 * mm         # vertical padding top/bottom
+    EQ_PAD_V    = 4 * mm         # vertical padding top/bottom
 
     area_top    = PAGE_H - MARGIN_T - 4 * mm
     area_bottom = MARGIN_B + SLIDE_NUM_H
@@ -325,7 +597,11 @@ def _draw_content(c, slide, figures_dir, stype):
     # ── Pre-calculate equation box height (needed for bullet spacing) ────────
     eq_h = 0
     if equations:
-        eq_h = EQ_PAD_V * 2 + len(equations) * EQ_LEADING
+        # Estimate: fraction/radical lines need more space than simple lines
+        for eq in equations:
+            has_frac = ("/" in eq and "(" in eq) or "\u221a" in eq
+            eq_h += EQ_LEADING if has_frac else EQ_FONT_SZ * 1.8
+        eq_h += EQ_PAD_V * 2
 
     # ── Bullets — laid out from top, leaving room for equations after ─────────
     bullets_top = heading_bottom - 4 * mm
@@ -369,10 +645,19 @@ def _draw_content(c, slide, figures_dir, stype):
     # ── Equation box — placed right after bullets with accent bar ────────────
     if equations:
         eq_gap = 4 * mm
+
+        # Measure actual content height: taller leading for lines with
+        # fractions/radicals, normal leading for simple lines
+        line_heights = []
+        for eq in equations:
+            has_frac = ("/" in eq and "(" in eq) or "\u221a" in eq
+            lh = EQ_LEADING if has_frac else EQ_FONT_SZ * 1.8
+            line_heights.append(lh)
+        content_h = sum(line_heights)
+        bh = EQ_PAD_V * 2 + content_h
+
         bx = MARGIN_L
         bw = text_w_mm * PTS
-        bh = eq_h
-        # Place directly below the last bullet
         by = bullet_end_y - eq_gap - bh
 
         # Light background with rounded corners
@@ -383,15 +668,15 @@ def _draw_content(c, slide, figures_dir, stype):
         c.setFillColor(C_ACCENT)
         c.roundRect(bx, by, EQ_ACCENT_W, bh, 2, fill=1, stroke=0)
 
-        # Draw each equation with formatted sub/superscripts
+        # Draw each equation, vertically centered in the box
         ey = by + bh - EQ_PAD_V - EQ_FONT_SZ * 0.3
-        for eq in equations:
+        for idx_eq, eq in enumerate(equations):
             _draw_equation_formatted(
                 c, eq, bx + EQ_PAD_L, ey,
                 MATH_FONT, EQ_FONT_SZ,
                 color=C_DARK, label_color=C_ACCENT,
             )
-            ey -= EQ_LEADING
+            ey -= line_heights[idx_eq]
 
     # ── Wide figure: placed below bullets + equations ────────────────────────
     if has_figure and fig_is_wide:
@@ -444,3 +729,150 @@ def _draw_figure_only(c, slide, figures_dir):
             lw = c.stringWidth(line, "Helvetica-Oblique", 10)
             c.drawString((PAGE_W - lw) / 2, ann_y, line)
             ann_y -= 10 * 1.5
+
+
+def _draw_tetris(c, cx: float, cy: float, block: float):
+    """
+    Draw a small Tetris-style block tower.  cx, cy = bottom-left of the grid.
+    block = size of one cell in pts.
+    """
+    # Tetris color palette
+    colors = [
+        HexColor("#00b4d8"),  # I - cyan
+        HexColor("#e63946"),  # Z - red
+        HexColor("#2a9d8f"),  # S - teal
+        HexColor("#f4a261"),  # L - orange
+        HexColor("#533483"),  # T - purple
+        HexColor("#457b9d"),  # J - blue
+        HexColor("#e9c46a"),  # O - yellow
+    ]
+    # Grid layout: each row is a list of (col, color_index)
+    # Builds a recognisable "stacked Tetris" look
+    rows = [
+        [(0, 0), (1, 0), (2, 0), (3, 0), (4, 1), (5, 1), (6, 2), (7, 2)],  # bottom
+        [(0, 3), (1, 3), (2, 4), (3, 4), (4, 4), (5, 1), (6, 2), (7, 6)],
+        [(1, 3), (2, 5), (3, 4), (5, 6), (6, 6), (7, 6)],
+        [(2, 5), (3, 5), (4, 5), (6, 0), (7, 0)],
+        [(3, 1), (4, 1), (6, 0), (7, 0)],
+        [(3, 1), (4, 2), (5, 2)],
+        [(4, 2), (5, 4)],
+    ]
+    gap = 1.5
+    for r, row in enumerate(rows):
+        for col, ci in row:
+            x = cx + col * (block + gap)
+            y = cy + r * (block + gap)
+            c.setFillColor(colors[ci])
+            c.roundRect(x, y, block, block, block * 0.15, fill=1, stroke=0)
+            # Highlight
+            c.setFillColor(HexColor("#ffffff40"))
+            c.roundRect(x + 1, y + block * 0.55, block - 2, block * 0.35,
+                        block * 0.1, fill=1, stroke=0)
+
+
+def _draw_conclusion(c, slide):
+    """Draw conclusion slide with Tetris graphic and takeaway bullets."""
+    _draw_accent_bar(c)
+
+    heading = slide.get("heading", "Key Takeaways")
+    bullets = slide.get("bullets") or []
+
+    area_top = PAGE_H - MARGIN_T - 4 * mm
+
+    # Heading in accent color
+    H_SIZE = 22
+    c.setFont("Helvetica-Bold", H_SIZE)
+    c.setFillColor(C_ACCENT)
+    c.drawString(MARGIN_L, area_top, heading)
+    heading_bottom = area_top - H_SIZE * 1.3 - 4 * mm
+
+    # Tetris block in the right area
+    tetris_x = PAGE_W - MARGIN_R - 100 * mm
+    tetris_y = MARGIN_B + SLIDE_NUM_H + 10 * mm
+    _draw_tetris(c, tetris_x, tetris_y, 12)
+
+    # Bullets on the left side
+    text_w_mm = (tetris_x - MARGIN_L - 8 * mm) / PTS
+    B_SIZE = 16
+    max_bc = _max_chars(text_w_mm, B_SIZE)
+    bullet_y = heading_bottom
+    indent = MARGIN_L + 6 * mm
+    marker_x = MARGIN_L + 1 * mm
+
+    for bullet in bullets:
+        c.setFont(MATH_FONT_REG, 9)
+        c.setFillColor(C_ACCENT)
+        c.drawString(marker_x, bullet_y + 2, "\u25b8")
+
+        c.setFont(MATH_FONT_REG, B_SIZE)
+        c.setFillColor(C_BODY)
+        lines = _wrap_text(bullet, max_bc)
+        for line in lines:
+            c.drawString(indent, bullet_y, line)
+            bullet_y -= B_SIZE * 1.4
+        bullet_y -= B_SIZE * 0.8
+
+    # Inspirational quote at bottom-left
+    quote = "\u201cSmall ideas can generate greatness.\u201d"
+    c.setFont("Helvetica-BoldOblique", 13)
+    c.setFillColor(C_ACCENT)
+    c.drawString(MARGIN_L + 6 * mm, MARGIN_B + SLIDE_NUM_H + 6 * mm, quote)
+
+
+def _draw_thankyou(c, total_slides: int):
+    """Draw a stylish 'Thank You' closing slide."""
+    # Dark background
+    c.setFillColor(C_MID)
+    c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+
+    # Accent bar left
+    c.setFillColor(C_ACCENT)
+    c.rect(0, 0, 5 * mm, PAGE_H, fill=1, stroke=0)
+
+    # Decorative blocks (Tetris-inspired scattered pieces)
+    deco_colors = [
+        HexColor("#533483"), HexColor("#0f3460"),
+        HexColor("#2a9d8f"), HexColor("#e9c46a"),
+        HexColor("#00b4d8"), HexColor("#f4a261"),
+    ]
+    import random
+    rng = random.Random(42)   # deterministic for reproducibility
+    for _ in range(25):
+        bx = rng.uniform(20, PAGE_W - 20)
+        by = rng.uniform(20, PAGE_H - 20)
+        bs = rng.uniform(6, 18)
+        col = deco_colors[rng.randint(0, len(deco_colors) - 1)]
+        c.setFillColor(col)
+        c.setFillAlpha(0.12)
+        c.roundRect(bx, by, bs, bs, 2, fill=1, stroke=0)
+    c.setFillAlpha(1.0)
+
+    # "THANK YOU" in large art text
+    cy = PAGE_H / 2 + 20
+    # Shadow
+    c.setFont("Helvetica-Bold", 54)
+    c.setFillColor(HexColor("#000000"))
+    c.setFillAlpha(0.15)
+    tw = c.stringWidth("THANK YOU", "Helvetica-Bold", 54)
+    c.drawString(PAGE_W / 2 - tw / 2 + 2, cy - 2, "THANK YOU")
+    c.setFillAlpha(1.0)
+
+    # Main text with gradient-like effect (two overlapping renders)
+    c.setFillColor(HexColor("#e9c46a"))
+    c.drawString(PAGE_W / 2 - tw / 2, cy, "THANK YOU")
+
+    # Subtitle
+    sub = "for your attention"
+    c.setFont("Helvetica", 16)
+    c.setFillColor(HexColor("#ccccdd"))
+    sw = c.stringWidth(sub, "Helvetica", 16)
+    c.drawString(PAGE_W / 2 - sw / 2, cy - 40, sub)
+
+    # Bottom decorative line
+    c.setStrokeColor(C_ACCENT)
+    c.setLineWidth(2)
+    line_w = 60 * mm
+    c.line(PAGE_W / 2 - line_w / 2, cy - 60, PAGE_W / 2 + line_w / 2, cy - 60)
+
+    # Slide number
+    _draw_slide_number(c, total_slides, total_slides)
